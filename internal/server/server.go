@@ -60,8 +60,14 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 		AllowAgentFwd: cfg.AllowAgentFwd,
 	})
 
+	var fwdMgr *forward.Manager
+	if cfg.AllowForward {
+		fwdMgr = forward.NewManager(ctx, srvConn, cfg.Logger)
+		defer fwdMgr.Close()
+	}
+
 	var wg sync.WaitGroup
-	go drainGlobalRequests(cfg.Logger, reqs)
+	go drainGlobalRequests(cfg.Logger, reqs, fwdMgr)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -84,9 +90,12 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 	return nil
 }
 
-func drainGlobalRequests(log *slog.Logger, reqs <-chan *ssh.Request) {
+func drainGlobalRequests(log *slog.Logger, reqs <-chan *ssh.Request, fwd *forward.Manager) {
 	for req := range reqs {
-		log.Debug("global request rejected (skeleton)", "type", req.Type)
+		if fwd != nil && fwd.HandleRequest(req) {
+			continue
+		}
+		log.Debug("global request rejected", "type", req.Type)
 		if req.WantReply {
 			_ = req.Reply(false, nil)
 		}
