@@ -16,11 +16,10 @@ ssh-add "$keyfile" 2>/dev/null
 # and stdssh share a process tree, so the local SSH_AUTH_SOCK env naturally
 # leaks into the remote shell.)
 #
-# NB: stdssh keeps the connection open after the session exits when agent
-# forwarding was requested — likely an unclosed agent listener. Real bug
-# to fix separately; wrap with timeout(1) so the smoke doesn't hang.
+# Keep a generous timeout as a safety net so a regression in connection
+# teardown can't hang CI, but the session should exit promptly.
 out=$(timeout 8 ssh "${_SSH_BASE_OPTS[@]}" -A fake@fake \
-  'printf "REMOTE_SOCK=%s\n" "$SSH_AUTH_SOCK"; ssh-add -l' 2>&1 || true)
+  'printf "REMOTE_SOCK=%s\n" "$SSH_AUTH_SOCK"; ssh-add -l' 2>&1)
 
 echo "$out" | grep -qi 'ed25519' || {
   echo 'agent forwarding did not list the key:' >&2

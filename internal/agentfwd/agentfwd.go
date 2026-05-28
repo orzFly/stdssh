@@ -66,6 +66,10 @@ type binding struct {
 	log  *slog.Logger
 	dir  string
 
+	mu     sync.Mutex
+	closed bool
+	chs    map[ssh.Channel]struct{}
+
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -85,32 +89,72 @@ func (b *binding) acceptLoop() {
 }
 
 func (b *binding) handle(c net.Conn) {
+	defer c.Close()
 	ch, reqs, err := b.conn.OpenChannel("auth-agent@openssh.com", nil)
 	if err != nil {
 		b.log.Debug("auth-agent open rejected", "err", err)
-		_ = c.Close()
 		return
 	}
+
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		_ = ch.Close()
+		return
+	}
+	if b.chs == nil {
+		b.chs = map[ssh.Channel]struct{}{}
+	}
+	b.chs[ch] = struct{}{}
+	b.mu.Unlock()
+
+	defer func() {
+		b.mu.Lock()
+		delete(b.chs, ch)
+		b.mu.Unlock()
+		_ = ch.Close()
+	}()
+
 	go ssh.DiscardRequests(reqs)
 
+	// Half-close pattern: when one direction finishes, signal EOF on the
+	// other end so the peer knows to close too. Without this, ssh-add closes
+	// its unix socket but the SSH peer keeps the auth-agent channel open,
+	// blocking io.Copy(c, ch) and leaking the channel — which in turn keeps
+	// the whole SSH connection alive after the session exits.
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		_, _ = io.Copy(c, ch)
+		if cw, ok := c.(interface{ CloseWrite() error }); ok {
+			_ = cw.CloseWrite()
+		}
 	}()
 	go func() {
 		defer wg.Done()
 		_, _ = io.Copy(ch, c)
+		_ = ch.CloseWrite()
 	}()
 	wg.Wait()
-	_ = ch.Close()
-	_ = c.Close()
 }
 
 func (b *binding) Close() error {
 	b.closeOnce.Do(func() {
+		b.mu.Lock()
+		b.closed = true
+		chs := b.chs
+		b.chs = nil
+		b.mu.Unlock()
+
 		err1 := b.ln.Close()
+		// Forcibly close any in-flight auth-agent channels: if a peer never
+		// responded to our CloseWrite (or a connection is mid-transfer when
+		// the session ends), this unblocks the handle() goroutines and
+		// releases the underlying SSH channels so the client can disconnect.
+		for ch := range chs {
+			_ = ch.Close()
+		}
 		err2 := os.RemoveAll(b.dir)
 		b.closeErr = errors.Join(err1, err2)
 	})
