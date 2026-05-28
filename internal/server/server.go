@@ -28,6 +28,7 @@ type Config struct {
 	MaxForwards  int          // max concurrent -R listeners; 0 = unlimited
 	ForwardAllow []*net.IPNet // allowed -L destination CIDRs; nil = all
 	ForwardDeny  []*net.IPNet // denied -L destination CIDRs; deny wins over allow
+	GatewayPorts bool         // allow -R bind on non-loopback; OpenSSH default is false
 }
 
 // Run drives an SSH server session on conn until either side closes.
@@ -72,7 +73,7 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 
 	var fwdMgr *forward.Manager
 	if cfg.AllowForward {
-		fwdMgr = forward.NewManager(srvConn, cfg.Logger, cfg.MaxForwards)
+		fwdMgr = forward.NewManager(srvConn, cfg.Logger, cfg.MaxForwards, cfg.GatewayPorts)
 		defer fwdMgr.Close()
 	}
 

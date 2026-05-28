@@ -48,6 +48,7 @@ func run() error {
 		maxForwards     = flag.Int("max-forwards", 0, "maximum concurrent -R listeners (0 = unlimited)")
 		forwardAllowStr = flag.String("forward-allow", "", "comma-separated CIDRs for allowed -L destinations (default: all)")
 		forwardDenyStr  = flag.String("forward-deny", "", "comma-separated CIDRs to deny for -L destinations (takes precedence over allow)")
+		gatewayPorts    = flag.Bool("gateway-ports", false, "allow -R remote forwards to bind on non-loopback addresses (matches OpenSSH GatewayPorts)")
 		showVersion     = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Usage = func() {
@@ -98,6 +99,7 @@ func run() error {
 		MaxForwards:  *maxForwards,
 		ForwardAllow: forwardAllow,
 		ForwardDeny:  forwardDeny,
+		GatewayPorts: *gatewayPorts,
 	}
 
 	// Catch SIGHUP too: when stdssh runs as an ssh ProxyCommand, the ssh

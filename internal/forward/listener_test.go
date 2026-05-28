@@ -29,6 +29,40 @@ func TestSplitHostPortTCP(t *testing.T) {
 	}
 }
 
+func TestRewriteListenAddr(t *testing.T) {
+	cases := []struct {
+		req          string
+		gatewayPorts bool
+		want         string
+	}{
+		// GatewayPorts=false: only loopback literals survive; everything else
+		// — wildcard tokens AND public addresses — collapses to v4 loopback.
+		{"", false, "127.0.0.1"},
+		{"*", false, "127.0.0.1"},
+		{"0.0.0.0", false, "127.0.0.1"},
+		{"::", false, "127.0.0.1"},
+		{"127.0.0.1", false, "127.0.0.1"},
+		{"::1", false, "::1"},
+		{"localhost", false, "localhost"},
+		{"192.168.1.10", false, "127.0.0.1"},
+
+		// GatewayPorts=true: wildcard tokens become the dual-stack wildcard
+		// (empty bind in net.Listen); literals pass through.
+		{"", true, ""},
+		{"*", true, ""},
+		{"0.0.0.0", true, "0.0.0.0"},
+		{"::", true, "::"},
+		{"127.0.0.1", true, "127.0.0.1"},
+		{"192.168.1.10", true, "192.168.1.10"},
+	}
+	for _, tc := range cases {
+		got := rewriteListenAddr(tc.req, tc.gatewayPorts)
+		if got != tc.want {
+			t.Errorf("rewriteListenAddr(%q, gw=%v) = %q, want %q", tc.req, tc.gatewayPorts, got, tc.want)
+		}
+	}
+}
+
 func TestSplitHostPortUnix(t *testing.T) {
 	a := &net.UnixAddr{Name: "/tmp/x.sock", Net: "unix"}
 	host, port := splitHostPort(a)

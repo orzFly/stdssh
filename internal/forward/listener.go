@@ -32,6 +32,7 @@ type Manager struct {
 	conn         *ssh.ServerConn
 	log          *slog.Logger
 	maxListeners int
+	gatewayPorts bool
 
 	mu        sync.Mutex
 	listeners map[string]net.Listener
@@ -39,13 +40,38 @@ type Manager struct {
 }
 
 // NewManager returns a Manager bound to the given ServerConn. Call Close to
-// stop all listeners.
-func NewManager(conn *ssh.ServerConn, log *slog.Logger, maxListeners int) *Manager {
+// stop all listeners. With gatewayPorts=false (the OpenSSH default) any
+// wildcard or non-loopback bind address requested by the client is forced to
+// 127.0.0.1 so `-R 8080:...` does not silently expose a port to the network.
+func NewManager(conn *ssh.ServerConn, log *slog.Logger, maxListeners int, gatewayPorts bool) *Manager {
 	return &Manager{
 		conn:         conn,
 		log:          log,
 		maxListeners: maxListeners,
+		gatewayPorts: gatewayPorts,
 		listeners:    map[string]net.Listener{},
+	}
+}
+
+// rewriteListenAddr applies the GatewayPorts policy. Mirrors OpenSSH's
+// channel_fwd_bind_addr (channels.c): with GatewayPorts=no, only explicit
+// 127.0.0.1 / ::1 (and the resolvable "localhost") are honoured verbatim;
+// everything else collapses to v4 loopback. With GatewayPorts=yes the
+// wildcard tokens "" and "*" pass through as the dual-stack wildcard and
+// literal addresses are used as-is.
+func rewriteListenAddr(req string, gatewayPorts bool) string {
+	if gatewayPorts {
+		switch req {
+		case "", "*":
+			return ""
+		}
+		return req
+	}
+	switch req {
+	case "127.0.0.1", "::1", "localhost":
+		return req
+	default:
+		return "127.0.0.1"
 	}
 }
 
@@ -69,7 +95,12 @@ func (m *Manager) handleForward(req *ssh.Request) {
 		_ = req.Reply(false, nil)
 		return
 	}
-	addr := net.JoinHostPort(p.BindAddr, strconv.FormatUint(uint64(p.BindPort), 10))
+	bindHost := rewriteListenAddr(p.BindAddr, m.gatewayPorts)
+	if bindHost != p.BindAddr {
+		m.log.Debug("tcpip-forward bind address rewritten by GatewayPorts policy",
+			"requested", p.BindAddr, "actual", bindHost)
+	}
+	addr := net.JoinHostPort(bindHost, strconv.FormatUint(uint64(p.BindPort), 10))
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		m.log.Warn("tcpip-forward listen failed", "addr", addr, "err", err)
