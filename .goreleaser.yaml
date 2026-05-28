@@ -30,9 +30,7 @@ archives:
     name_template: >-
       {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     files:
-      - README.md
-      - AGENTS.md
-      - specs/**/*
+      - LICENSE
 
 checksum:
   name_template: checksums.txt
