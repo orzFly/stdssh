@@ -36,6 +36,9 @@ ssh -o ProxyCommand="./stdssh --hostkey ./dev_hostkey" fake@fake
 | `--no-pty` | Reject `pty-req`. |
 | `--no-sftp` | Reject the `sftp` subsystem. |
 | `--no-forward` | Reject `direct-tcpip` and `tcpip-forward` (disables `-L`, `-R`, `-D`). |
+| `--max-forwards <n>` | Maximum concurrent `-R` listeners (`0` = unlimited, default). |
+| `--forward-allow <CIDRs>` | Comma-separated CIDRs for allowed `-L` destinations (default: all). |
+| `--forward-deny <CIDRs>` | Comma-separated CIDRs to deny for `-L` destinations (takes precedence over allow). |
 | `--no-agent-forward` | Reject `auth-agent-req@openssh.com`. |
 | `--version` | Print version and exit. |
 

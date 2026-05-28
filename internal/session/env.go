@@ -68,7 +68,7 @@ func composeEnv(client map[string]string, shell string) []string {
 		}
 	}
 	merged["SHELL"] = shell
-	if _, ok := merged["PATH"]; !ok {
+	if v, ok := merged["PATH"]; !ok || v == "" {
 		merged["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 	}
 

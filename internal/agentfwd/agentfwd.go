@@ -21,11 +21,7 @@ import (
 // Returns the socket path (to be exported as SSH_AUTH_SOCK in the child) and a
 // Closer that shuts the listener and removes the socket directory.
 func Bind(conn *ssh.ServerConn, log *slog.Logger) (string, io.Closer, error) {
-	parent := socketParent()
-	if err := os.MkdirAll(parent, 0o700); err != nil {
-		return "", nil, fmt.Errorf("agentfwd: mkdir parent: %w", err)
-	}
-	dir, err := os.MkdirTemp(parent, "agent-")
+	dir, err := os.MkdirTemp(socketParent(), "stdssh-agent-")
 	if err != nil {
 		return "", nil, fmt.Errorf("agentfwd: mkdtemp: %w", err)
 	}
@@ -55,9 +51,9 @@ func Bind(conn *ssh.ServerConn, log *slog.Logger) (string, io.Closer, error) {
 
 func socketParent() string {
 	if v := os.Getenv("XDG_RUNTIME_DIR"); v != "" {
-		return filepath.Join(v, "stdssh")
+		return v
 	}
-	return filepath.Join(os.TempDir(), "stdssh")
+	return os.TempDir()
 }
 
 type binding struct {

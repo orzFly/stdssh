@@ -25,6 +25,9 @@ type Config struct {
 	AllowSFTP     bool
 	AllowForward  bool
 	AllowAgentFwd bool
+	MaxForwards  int          // max concurrent -R listeners; 0 = unlimited
+	ForwardAllow []*net.IPNet // allowed -L destination CIDRs; nil = all
+	ForwardDeny  []*net.IPNet // denied -L destination CIDRs; deny wins over allow
 }
 
 // Run drives an SSH server session on conn until either side closes.
@@ -69,7 +72,7 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 
 	var fwdMgr *forward.Manager
 	if cfg.AllowForward {
-		fwdMgr = forward.NewManager(srvConn, cfg.Logger)
+		fwdMgr = forward.NewManager(srvConn, cfg.Logger, cfg.MaxForwards)
 		defer fwdMgr.Close()
 	}
 
@@ -78,7 +81,7 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		dispatchChannels(connCtx, cfg.Logger, chans, sessHandler, cfg.AllowForward)
+		dispatchChannels(connCtx, cfg.Logger, chans, sessHandler, cfg.AllowForward, cfg.ForwardAllow, cfg.ForwardDeny)
 	}()
 
 	waitErr := make(chan error, 1)
@@ -115,7 +118,7 @@ func drainGlobalRequests(log *slog.Logger, reqs <-chan *ssh.Request, fwd *forwar
 	}
 }
 
-func dispatchChannels(ctx context.Context, log *slog.Logger, chans <-chan ssh.NewChannel, sess *session.Handler, allowForward bool) {
+func dispatchChannels(ctx context.Context, log *slog.Logger, chans <-chan ssh.NewChannel, sess *session.Handler, allowForward bool, forwardAllow, forwardDeny []*net.IPNet) {
 	var wg sync.WaitGroup
 	for newCh := range chans {
 		newCh := newCh
@@ -136,7 +139,7 @@ func dispatchChannels(ctx context.Context, log *slog.Logger, chans <-chan ssh.Ne
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if err := forward.HandleDirect(ctx, newCh, log); err != nil {
+				if err := forward.HandleDirect(ctx, newCh, log, forwardAllow, forwardDeny); err != nil {
 					log.Warn("direct-tcpip error", "err", err)
 				}
 			}()

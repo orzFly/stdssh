@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -43,8 +44,11 @@ func run() error {
 		noPTY       = flag.Bool("no-pty", false, "reject pty-req requests")
 		noSFTP      = flag.Bool("no-sftp", false, "reject the sftp subsystem")
 		noForward   = flag.Bool("no-forward", false, "reject direct-tcpip and tcpip-forward")
-		noAgentFwd  = flag.Bool("no-agent-forward", false, "reject SSH agent forwarding")
-		showVersion = flag.Bool("version", false, "print version and exit")
+		noAgentFwd      = flag.Bool("no-agent-forward", false, "reject SSH agent forwarding")
+		maxForwards     = flag.Int("max-forwards", 0, "maximum concurrent -R listeners (0 = unlimited)")
+		forwardAllowStr = flag.String("forward-allow", "", "comma-separated CIDRs for allowed -L destinations (default: all)")
+		forwardDenyStr  = flag.String("forward-deny", "", "comma-separated CIDRs to deny for -L destinations (takes precedence over allow)")
+		showVersion     = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "stdssh — SSH server over stdio (see specs/20260528-stdio-ssh-server)\n\n")
@@ -61,6 +65,15 @@ func run() error {
 	}
 
 	signer, err := selectHostKey(*hostkeyPath, *hostkeySeed)
+	if err != nil {
+		return err
+	}
+
+	forwardAllow, err := parseCIDRs(*forwardAllowStr)
+	if err != nil {
+		return err
+	}
+	forwardDeny, err := parseCIDRs(*forwardDenyStr)
 	if err != nil {
 		return err
 	}
@@ -82,6 +95,9 @@ func run() error {
 		AllowSFTP:     !*noSFTP,
 		AllowForward:  !*noForward,
 		AllowAgentFwd: !*noAgentFwd,
+		MaxForwards:  *maxForwards,
+		ForwardAllow: forwardAllow,
+		ForwardDeny:  forwardDeny,
 	}
 
 	// Catch SIGHUP too: when stdssh runs as an ssh ProxyCommand, the ssh
@@ -124,6 +140,25 @@ func buildLogger(level string) (*slog.Logger, error) {
 	}
 	h := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})
 	return slog.New(h), nil
+}
+
+func parseCIDRs(s string) ([]*net.IPNet, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var nets []*net.IPNet
+	for _, cidr := range strings.Split(s, ",") {
+		cidr = strings.TrimSpace(cidr)
+		if cidr == "" {
+			continue
+		}
+		_, ipnet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			return nil, flagError(fmt.Sprintf("bad --forward-allow CIDR %q: %v", cidr, err))
+		}
+		nets = append(nets, ipnet)
+	}
+	return nets, nil
 }
 
 type flagError string

@@ -29,8 +29,9 @@ type forwardedTCPIPPayload struct {
 
 // Manager tracks the active -R listeners for one ssh.ServerConn.
 type Manager struct {
-	conn *ssh.ServerConn
-	log  *slog.Logger
+	conn         *ssh.ServerConn
+	log          *slog.Logger
+	maxListeners int
 
 	mu        sync.Mutex
 	listeners map[string]net.Listener
@@ -39,11 +40,12 @@ type Manager struct {
 
 // NewManager returns a Manager bound to the given ServerConn. Call Close to
 // stop all listeners.
-func NewManager(conn *ssh.ServerConn, log *slog.Logger) *Manager {
+func NewManager(conn *ssh.ServerConn, log *slog.Logger, maxListeners int) *Manager {
 	return &Manager{
-		conn:      conn,
-		log:       log,
-		listeners: map[string]net.Listener{},
+		conn:         conn,
+		log:          log,
+		maxListeners: maxListeners,
+		listeners:    map[string]net.Listener{},
 	}
 }
 
@@ -90,16 +92,19 @@ func (m *Manager) handleForward(req *ssh.Request) {
 		_ = req.Reply(false, nil)
 		return
 	}
+	if m.maxListeners > 0 && len(m.listeners) >= m.maxListeners {
+		m.mu.Unlock()
+		_ = ln.Close()
+		m.log.Warn("tcpip-forward rejected: listener limit reached", "max", m.maxListeners)
+		_ = req.Reply(false, nil)
+		return
+	}
 	key := listenerKey(p.BindAddr, assignedPort)
 	m.listeners[key] = ln
 	m.mu.Unlock()
 
-	// Reply with the assigned port (relevant when client requested port 0).
-	var reply []byte
-	if p.BindPort == 0 {
-		reply = make([]byte, 4)
-		binary.BigEndian.PutUint32(reply, assignedPort)
-	}
+	reply := make([]byte, 4)
+	binary.BigEndian.PutUint32(reply, assignedPort)
 	_ = req.Reply(true, reply)
 
 	m.log.Debug("tcpip-forward listening", "addr", ln.Addr().String())
