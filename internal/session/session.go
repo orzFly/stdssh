@@ -68,9 +68,11 @@ type sessionState struct {
 	log *slog.Logger
 	ctx context.Context
 
-	mu      sync.Mutex
-	env     map[string]string
-	started bool
+	mu        sync.Mutex
+	env       map[string]string
+	started   bool
+	pty       *ptyRequest
+	ptyMaster *os.File
 
 	closed chan struct{}
 	cmd    *exec.Cmd
@@ -117,7 +119,31 @@ func (s *sessionState) handle(req *ssh.Request) bool {
 		s.reply(req, true)
 		return true
 
-	case "pty-req", "window-change", "auth-agent-req@openssh.com", "subsystem":
+	case "pty-req":
+		if !s.h.cfg.AllowPTY {
+			s.reply(req, false)
+			return true
+		}
+		var m ptyRequest
+		if err := ssh.Unmarshal(req.Payload, &m); err != nil {
+			s.reply(req, false)
+			return true
+		}
+		s.mu.Lock()
+		s.pty = &m
+		s.mu.Unlock()
+		s.reply(req, true)
+		return true
+
+	case "window-change":
+		var m windowChangeRequest
+		if err := ssh.Unmarshal(req.Payload, &m); err == nil {
+			s.handleWindowChange(&m)
+		}
+		// window-change never wants reply.
+		return true
+
+	case "auth-agent-req@openssh.com", "subsystem":
 		// Filled in by later phases. For now reject quietly.
 		s.reply(req, false)
 		return true
@@ -153,6 +179,7 @@ func (s *sessionState) start(extraArgs []string) bool {
 	}
 	s.started = true
 	envSnap := snapshotEnv(s.env)
+	ptyReq := s.pty
 	s.mu.Unlock()
 
 	shell := s.resolveShell()
@@ -162,16 +189,28 @@ func (s *sessionState) start(extraArgs []string) bool {
 	}
 
 	cmd := exec.CommandContext(s.ctx, shell, args...)
-	cmd.Env = composeEnv(envSnap, shell)
-	cmd.Dir = homeDir()
-	cmd.Stdin = s.ch
-	cmd.Stdout = s.ch
-	cmd.Stderr = s.ch.Stderr()
-
-	if err := cmd.Start(); err != nil {
-		s.log.Warn("exec start failed", "shell", shell, "err", err)
-		return false
+	env := composeEnv(envSnap, shell)
+	if ptyReq != nil && ptyReq.Term != "" {
+		env = append(env, "TERM="+ptyReq.Term)
 	}
+	cmd.Env = env
+	cmd.Dir = homeDir()
+
+	if ptyReq != nil {
+		if err := s.startWithPTY(cmd, ptyReq); err != nil {
+			s.log.Warn("pty start failed", "shell", shell, "err", err)
+			return false
+		}
+	} else {
+		cmd.Stdin = s.ch
+		cmd.Stdout = s.ch
+		cmd.Stderr = s.ch.Stderr()
+		if err := cmd.Start(); err != nil {
+			s.log.Warn("exec start failed", "shell", shell, "err", err)
+			return false
+		}
+	}
+
 	s.cmd = cmd
 	go s.waitAndExit(cmd)
 	return true
@@ -207,6 +246,12 @@ func (s *sessionState) cleanup() {
 		default:
 			_ = s.cmd.Process.Signal(syscall.SIGHUP)
 		}
+	}
+	s.mu.Lock()
+	master := s.ptyMaster
+	s.mu.Unlock()
+	if master != nil {
+		_ = master.Close()
 	}
 	_ = s.ch.Close()
 }
