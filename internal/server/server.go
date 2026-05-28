@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"stdssh/internal/forward"
 	"stdssh/internal/session"
 )
 
@@ -64,7 +65,7 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		dispatchChannels(ctx, cfg.Logger, chans, sessHandler)
+		dispatchChannels(ctx, cfg.Logger, chans, sessHandler, cfg.AllowForward)
 	}()
 
 	waitErr := make(chan error, 1)
@@ -92,7 +93,7 @@ func drainGlobalRequests(log *slog.Logger, reqs <-chan *ssh.Request) {
 	}
 }
 
-func dispatchChannels(ctx context.Context, log *slog.Logger, chans <-chan ssh.NewChannel, sess *session.Handler) {
+func dispatchChannels(ctx context.Context, log *slog.Logger, chans <-chan ssh.NewChannel, sess *session.Handler, allowForward bool) {
 	var wg sync.WaitGroup
 	for newCh := range chans {
 		newCh := newCh
@@ -103,6 +104,18 @@ func dispatchChannels(ctx context.Context, log *slog.Logger, chans <-chan ssh.Ne
 				defer wg.Done()
 				if err := sess.Serve(ctx, newCh); err != nil {
 					log.Warn("session handler error", "err", err)
+				}
+			}()
+		case "direct-tcpip":
+			if !allowForward {
+				_ = newCh.Reject(ssh.Prohibited, "forwarding disabled")
+				continue
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := forward.HandleDirect(ctx, newCh, log); err != nil {
+					log.Warn("direct-tcpip error", "err", err)
 				}
 			}()
 		default:
