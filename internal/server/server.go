@@ -54,6 +54,7 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 
 	sessHandler := session.NewHandler(session.HandlerConfig{
 		Logger:        cfg.Logger,
+		Conn:          srvConn,
 		Shell:         cfg.Shell,
 		AllowPTY:      cfg.AllowPTY,
 		AllowSFTP:     cfg.AllowSFTP,

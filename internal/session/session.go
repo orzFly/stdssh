@@ -14,14 +14,18 @@ import (
 	"sync"
 	"syscall"
 
+	"io"
+
 	"golang.org/x/crypto/ssh"
 
+	"stdssh/internal/agentfwd"
 	"stdssh/internal/sftp"
 )
 
 type HandlerConfig struct {
 	Logger        *slog.Logger
-	Shell         string // override; empty = $SHELL or /bin/sh
+	Conn          *ssh.ServerConn // required when AllowAgentFwd is true
+	Shell         string          // override; empty = $SHELL or /bin/sh
 	AllowPTY      bool
 	AllowSFTP     bool
 	AllowAgentFwd bool
@@ -75,6 +79,9 @@ type sessionState struct {
 	started   bool
 	pty       *ptyRequest
 	ptyMaster *os.File
+
+	agentSock   string
+	agentCloser io.Closer
 
 	closed chan struct{}
 	cmd    *exec.Cmd
@@ -179,8 +186,21 @@ func (s *sessionState) handle(req *ssh.Request) bool {
 		}
 
 	case "auth-agent-req@openssh.com":
-		// Filled in by Phase 9.
-		s.reply(req, false)
+		if !s.h.cfg.AllowAgentFwd || s.h.cfg.Conn == nil {
+			s.reply(req, false)
+			return true
+		}
+		sock, closer, err := agentfwd.Bind(s.h.cfg.Conn, s.log)
+		if err != nil {
+			s.log.Warn("agentfwd bind", "err", err)
+			s.reply(req, false)
+			return true
+		}
+		s.mu.Lock()
+		s.agentSock = sock
+		s.agentCloser = closer
+		s.mu.Unlock()
+		s.reply(req, true)
 		return true
 
 	default:
@@ -215,6 +235,7 @@ func (s *sessionState) start(extraArgs []string) bool {
 	s.started = true
 	envSnap := snapshotEnv(s.env)
 	ptyReq := s.pty
+	agentSock := s.agentSock
 	s.mu.Unlock()
 
 	shell := s.resolveShell()
@@ -227,6 +248,9 @@ func (s *sessionState) start(extraArgs []string) bool {
 	env := composeEnv(envSnap, shell)
 	if ptyReq != nil && ptyReq.Term != "" {
 		env = append(env, "TERM="+ptyReq.Term)
+	}
+	if agentSock != "" {
+		env = append(env, "SSH_AUTH_SOCK="+agentSock)
 	}
 	cmd.Env = env
 	cmd.Dir = homeDir()
@@ -284,9 +308,14 @@ func (s *sessionState) cleanup() {
 	}
 	s.mu.Lock()
 	master := s.ptyMaster
+	agentCloser := s.agentCloser
+	s.agentCloser = nil
 	s.mu.Unlock()
 	if master != nil {
 		_ = master.Close()
+	}
+	if agentCloser != nil {
+		_ = agentCloser.Close()
 	}
 	_ = s.ch.Close()
 }
