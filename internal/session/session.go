@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -250,7 +251,7 @@ func (s *sessionState) startExec(command string) bool {
 }
 
 // start launches the shell (or shell -c <command>) wired to the SSH channel.
-// extraArgs nil ⇒ login shell (`-l`).
+// extraArgs nil ⇒ login shell.
 func (s *sessionState) start(extraArgs []string) bool {
 	s.mu.Lock()
 	if s.started {
@@ -264,12 +265,21 @@ func (s *sessionState) start(extraArgs []string) bool {
 	s.mu.Unlock()
 
 	shell := s.resolveShell()
-	args := extraArgs
-	if args == nil {
-		args = []string{"-l"}
-	}
+	base := filepath.Base(shell)
 
-	cmd := exec.CommandContext(s.ctx, shell, args...)
+	cmd := exec.CommandContext(s.ctx, shell)
+	// Match OpenSSH session.c argv conventions:
+	//   * login shell: argv[0] = "-<basename>" (the leading '-' is the
+	//     portable login-shell signal recognised by bash/zsh/dash/csh, more
+	//     universal than `-l`).
+	//   * command:     argv[0] = "<basename>", then the verbatim flags.
+	// cmd.Path remains the absolute shell path so the kernel finds the
+	// binary; only argv[0] is cosmetic / login-detection.
+	if extraArgs == nil {
+		cmd.Args = []string{"-" + base}
+	} else {
+		cmd.Args = append([]string{base}, extraArgs...)
+	}
 	// Default Cancel is Process.Kill (SIGKILL to the immediate pid), which
 	// races with cleanup() and orphans grandchildren — the pgroup is left
 	// intact because nothing signals it. Override to SIGHUP the whole pgroup
@@ -293,6 +303,12 @@ func (s *sessionState) start(extraArgs []string) bool {
 			return false
 		}
 		ptyMaster, ptySlave = m, sv
+		// Apply the client-supplied termios (intr / erase / IUTF8 / etc.) to
+		// the slave before the child inherits it. Best effort: a malformed
+		// modelist or unsupported opcode shouldn't tank the session.
+		if err := applyModelist(ptySlave, []byte(ptyReq.Modelist)); err != nil {
+			s.log.Debug("applyModelist failed", "err", err)
+		}
 	}
 
 	env := composeEnv(envSnap, shell)
@@ -381,7 +397,12 @@ func (s *sessionState) forwardSignal(name string) {
 	if !ok {
 		return
 	}
-	_ = cmd.Process.Signal(sig)
+	// Signal the whole session pgroup, matching OpenSSH (session.c killpg).
+	// Both start paths arrange pgid == child.Pid (PTY: Setsid; non-PTY: Setpgid),
+	// so kill(-pid, sig) reaches the shell *and* its descendants (e.g. a
+	// background `sleep` still under the same session) without escaping into
+	// stdssh's own process group.
+	_ = syscall.Kill(-cmd.Process.Pid, sig)
 }
 
 func (s *sessionState) cleanup() {

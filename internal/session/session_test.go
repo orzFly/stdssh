@@ -255,6 +255,57 @@ func TestKillChildGroupReachesGrandchildren(t *testing.T) {
 	t.Errorf("grandchild pid %d still alive after killChildGroup", grandPid)
 }
 
+// forwardSignal must reach the entire session pgroup (matching OpenSSH's
+// killpg in session.c), not just the immediate child. Spawn a parent shell
+// that backgrounds a sleeper, then call forwardSignal("INT") on a sessionState
+// wrapping the parent; the backgrounded sleeper — in the same pgroup but no
+// longer a direct child — must also die.
+func TestForwardSignalReachesPgroup(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "sleep 30 & echo $! ; wait")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if cmd.ProcessState == nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+	}()
+
+	buf := make([]byte, 32)
+	n, err := stdout.Read(buf)
+	if err != nil || n == 0 {
+		t.Fatalf("read grandchild pid: n=%d err=%v", n, err)
+	}
+	var grandPid int
+	for _, c := range buf[:n] {
+		if c < '0' || c > '9' {
+			break
+		}
+		grandPid = grandPid*10 + int(c-'0')
+	}
+	if grandPid == 0 {
+		t.Fatalf("could not parse grandchild pid from %q", string(buf[:n]))
+	}
+
+	s := &sessionState{cmd: cmd}
+	s.forwardSignal("INT")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(grandPid, 0); err != nil {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_ = syscall.Kill(grandPid, syscall.SIGKILL)
+	t.Errorf("grandchild pid %d still alive after forwardSignal(INT)", grandPid)
+}
+
 func TestExitStatus(t *testing.T) {
 	if got := exitStatus(nil); got != 0 {
 		t.Errorf("exitStatus(nil) = %d, want 0", got)
