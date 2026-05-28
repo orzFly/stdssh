@@ -15,6 +15,8 @@ import (
 	"syscall"
 
 	"golang.org/x/crypto/ssh"
+
+	"stdssh/internal/sftp"
 )
 
 type HandlerConfig struct {
@@ -143,8 +145,41 @@ func (s *sessionState) handle(req *ssh.Request) bool {
 		// window-change never wants reply.
 		return true
 
-	case "auth-agent-req@openssh.com", "subsystem":
-		// Filled in by later phases. For now reject quietly.
+	case "subsystem":
+		var m subsystemRequest
+		if err := ssh.Unmarshal(req.Payload, &m); err != nil {
+			s.reply(req, false)
+			return true
+		}
+		switch m.Name {
+		case "sftp":
+			if !s.h.cfg.AllowSFTP {
+				s.reply(req, false)
+				return true
+			}
+			s.mu.Lock()
+			already := s.started
+			s.started = true
+			s.mu.Unlock()
+			if already {
+				s.reply(req, false)
+				return true
+			}
+			s.reply(req, true)
+			if err := sftp.Serve(s.ctx, s.ch); err != nil {
+				s.log.Warn("sftp serve", "err", err)
+			}
+			_, _ = s.ch.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMessage{Status: 0}))
+			_ = s.ch.Close()
+			return false
+		default:
+			s.log.Debug("subsystem rejected", "name", m.Name)
+			s.reply(req, false)
+			return true
+		}
+
+	case "auth-agent-req@openssh.com":
+		// Filled in by Phase 9.
 		s.reply(req, false)
 		return true
 
