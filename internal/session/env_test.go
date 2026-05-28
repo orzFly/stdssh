@@ -23,6 +23,9 @@ func TestEnvNameAllowed(t *testing.T) {
 		{"SHELL", false},
 		{"SSH_AUTH_SOCK", false},
 		{"SSH_AGENT_PID", false},
+		{"SSH_CLIENT", false},
+		{"SSH_CONNECTION", false},
+		{"SSH_TTY", false},
 
 		{"LD_PRELOAD", false},
 		{"LD_LIBRARY_PATH", false},

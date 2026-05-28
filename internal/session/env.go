@@ -11,19 +11,22 @@ var envNameRE = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 
 // names we manage ourselves; the client cannot override them via "env" reqs,
 // and they are stripped from the inherited parent env too — either because we
-// re-derive them (PATH/HOME/USER/LOGNAME/SHELL) or because exposing the
-// parent's value would bypass server policy (SSH_AUTH_SOCK/SSH_AGENT_PID:
-// otherwise the parent's agent socket leaks to children even when the client
-// did not request agent forwarding or the server was started with
-// --no-agent-forward).
+// re-derive them (PATH/HOME/USER/LOGNAME/SHELL, SSH_CLIENT/SSH_CONNECTION/
+// SSH_TTY) or because exposing the parent's value would bypass server policy
+// (SSH_AUTH_SOCK/SSH_AGENT_PID: otherwise the parent's agent socket leaks to
+// children even when the client did not request agent forwarding or the server
+// was started with --no-agent-forward).
 var envBlocklist = map[string]struct{}{
-	"PATH":          {},
-	"HOME":          {},
-	"USER":          {},
-	"LOGNAME":       {},
-	"SHELL":         {},
-	"SSH_AUTH_SOCK": {},
-	"SSH_AGENT_PID": {},
+	"PATH":           {},
+	"HOME":           {},
+	"USER":           {},
+	"LOGNAME":        {},
+	"SHELL":          {},
+	"SSH_AUTH_SOCK":  {},
+	"SSH_AGENT_PID":  {},
+	"SSH_CLIENT":     {},
+	"SSH_CONNECTION": {},
+	"SSH_TTY":        {},
 }
 
 func envNameAllowed(name string) bool {

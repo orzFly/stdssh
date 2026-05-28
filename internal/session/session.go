@@ -281,6 +281,20 @@ func (s *sessionState) start(extraArgs []string) bool {
 		}
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGHUP)
 	}
+
+	// Allocate the PTY before composing env so SSH_TTY can include the slave
+	// device path. On any failure between here and attachPTY, the master/slave
+	// pair must be closed.
+	var ptyMaster, ptySlave *os.File
+	if ptyReq != nil {
+		m, sv, err := openPTY(ptyReq)
+		if err != nil {
+			s.log.Warn("pty open failed", "err", err)
+			return false
+		}
+		ptyMaster, ptySlave = m, sv
+	}
+
 	env := composeEnv(envSnap, shell)
 	if ptyReq != nil && ptyReq.Term != "" {
 		env = append(env, "TERM="+ptyReq.Term)
@@ -288,11 +302,24 @@ func (s *sessionState) start(extraArgs []string) bool {
 	if agentSock != "" {
 		env = append(env, "SSH_AUTH_SOCK="+agentSock)
 	}
+	// stdssh has no underlying socket and intentionally cannot be exposed via
+	// inetd/socket activation (no auth in this layer). Use the same UNKNOWN /
+	// 65535 placeholders OpenSSH uses for non-socket transports (packet.c,
+	// ssh_remote_ipaddr fallback) so remote shells still see "I am in ssh".
+	env = append(env,
+		"SSH_CLIENT=UNKNOWN 65535 65535",
+		"SSH_CONNECTION=UNKNOWN 65535 UNKNOWN 65535",
+	)
+	if ptySlave != nil {
+		env = append(env, "SSH_TTY="+ptySlave.Name())
+	}
 	cmd.Env = env
 	cmd.Dir = homeDir()
 
 	if ptyReq != nil {
-		if err := s.startWithPTY(cmd, ptyReq); err != nil {
+		if err := s.attachPTY(cmd, ptyMaster, ptySlave); err != nil {
+			_ = ptyMaster.Close()
+			_ = ptySlave.Close()
 			s.log.Warn("pty start failed", "shell", shell, "err", err)
 			return false
 		}
