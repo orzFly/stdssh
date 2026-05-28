@@ -27,7 +27,7 @@
               {
                 name = "stdssh";
                 command = ''
-                  exec go run . "$@"
+                  exec go run ./cmd/stdssh "$@"
                 '';
               }
             ];
