@@ -11,7 +11,27 @@ permissions:
   contents: write
 
 jobs:
+  smoke:
+    name: smoke (${{ matrix.distro }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [debian, ubuntu, alpine, arch, fedora]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run smoke cases
+        env:
+          ENGINE: docker
+          DISTRO: ${{ matrix.distro }}
+        run: bash tests/smoke/run.sh
+
   goreleaser:
+    needs: smoke
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
