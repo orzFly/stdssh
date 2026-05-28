@@ -65,7 +65,10 @@ func run() error {
 		return err
 	}
 
-	logger := buildLogger(*logLevel)
+	logger, err := buildLogger(*logLevel)
+	if err != nil {
+		return err
+	}
 	log.SetOutput(os.Stderr)
 	log.SetFlags(0)
 	slog.SetDefault(logger)
@@ -81,7 +84,11 @@ func run() error {
 		AllowAgentFwd: !*noAgentFwd,
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Catch SIGHUP too: when stdssh runs as an ssh ProxyCommand, the ssh
+	// client sends SIGHUP to the ProxyCommand subprocess on disconnect. Go's
+	// default action terminates the process immediately, which would skip
+	// our session cleanup and orphan the remote process tree.
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer cancel()
 
 	conn := stdioconn.New()
@@ -101,20 +108,22 @@ func selectHostKey(path, seed string) (ssh.Signer, error) {
 	}
 }
 
-func buildLogger(level string) *slog.Logger {
+func buildLogger(level string) (*slog.Logger, error) {
 	var lvl slog.Level
 	switch strings.ToLower(level) {
 	case "debug":
 		lvl = slog.LevelDebug
+	case "info":
+		lvl = slog.LevelInfo
 	case "warn", "warning":
 		lvl = slog.LevelWarn
 	case "error":
 		lvl = slog.LevelError
 	default:
-		lvl = slog.LevelInfo
+		return nil, flagError(fmt.Sprintf("unknown --log-level %q (want error|warn|info|debug)", level))
 	}
 	h := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: lvl})
-	return slog.New(h)
+	return slog.New(h), nil
 }
 
 type flagError string

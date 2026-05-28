@@ -21,6 +21,8 @@ func TestEnvNameAllowed(t *testing.T) {
 		{"USER", false},
 		{"LOGNAME", false},
 		{"SHELL", false},
+		{"SSH_AUTH_SOCK", false},
+		{"SSH_AGENT_PID", false},
 
 		{"LD_PRELOAD", false},
 		{"LD_LIBRARY_PATH", false},
@@ -102,6 +104,22 @@ func TestComposeEnvDefaultPATHWhenParentMissing(t *testing.T) {
 	got := toMap(env)
 	if !strings.Contains(got["PATH"], "/usr/bin") {
 		t.Errorf("default PATH should contain /usr/bin, got %q", got["PATH"])
+	}
+}
+
+// Regression: the parent's SSH_AUTH_SOCK / SSH_AGENT_PID must not leak to
+// children, otherwise the server process's own agent gets exposed even when
+// the client did not request agent forwarding.
+func TestComposeEnvDropsParentAgentVars(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "/tmp/parent-agent.sock")
+	t.Setenv("SSH_AGENT_PID", "1234")
+	env := composeEnv(nil, "/bin/sh")
+	got := toMap(env)
+	if v, ok := got["SSH_AUTH_SOCK"]; ok {
+		t.Errorf("SSH_AUTH_SOCK leaked from parent: %q", v)
+	}
+	if v, ok := got["SSH_AGENT_PID"]; ok {
+		t.Errorf("SSH_AGENT_PID leaked from parent: %q", v)
 	}
 }
 

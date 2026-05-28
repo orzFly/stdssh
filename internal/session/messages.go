@@ -38,3 +38,11 @@ type windowChangeRequest struct {
 type exitStatusMessage struct {
 	Status uint32
 }
+
+// RFC 4254 §6.10. "Lang" must be present (possibly empty) on the wire.
+type exitSignalMessage struct {
+	Signal     string
+	CoreDumped bool
+	ErrorMsg   string
+	Lang       string
+}

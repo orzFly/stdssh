@@ -51,6 +51,13 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 	cfg.Logger.Debug("ssh handshake completed",
 		"client_version", string(srvConn.ClientVersion()))
 
+	// Per-connection context: cancelled when the SSH transport closes (or the
+	// root context does). Session goroutines observe this through their exec
+	// children so a remote disconnect actually tears the children down,
+	// rather than leaving them running indefinitely.
+	connCtx, cancelConn := context.WithCancel(ctx)
+	defer cancelConn()
+
 	sessHandler := session.NewHandler(session.HandlerConfig{
 		Logger:        cfg.Logger,
 		Conn:          srvConn,
@@ -71,7 +78,7 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		dispatchChannels(ctx, cfg.Logger, chans, sessHandler, cfg.AllowForward)
+		dispatchChannels(connCtx, cfg.Logger, chans, sessHandler, cfg.AllowForward)
 	}()
 
 	waitErr := make(chan error, 1)
@@ -89,6 +96,9 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 			cfg.Logger.Debug("ssh wait returned", "err", err)
 		}
 	}
+	// Transport is down — cancel connCtx before draining session goroutines
+	// so their cleanup paths see context cancellation and don't sit waiting.
+	cancelConn()
 	wg.Wait()
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 	"os/user"
 	"sync"
 	"syscall"
+	"time"
 
 	"io"
 
@@ -21,6 +22,12 @@ import (
 	"stdssh/internal/agentfwd"
 	"stdssh/internal/sftp"
 )
+
+// childGraceTimeout is how long cleanup() waits for a SIGHUP'd process group
+// to exit before escalating to SIGKILL. Short enough that disconnect cleanup
+// isn't perceptibly slow; long enough that well-behaved shells finish writes
+// and exit normally.
+const childGraceTimeout = 2 * time.Second
 
 type HandlerConfig struct {
 	Logger        *slog.Logger
@@ -190,6 +197,17 @@ func (s *sessionState) handle(req *ssh.Request) bool {
 			s.reply(req, false)
 			return true
 		}
+		// Reject duplicates: a second Bind would orphan the first binding's
+		// listener and socket directory, since cleanup only closes the most
+		// recently stored agentCloser.
+		s.mu.Lock()
+		already := s.agentCloser != nil
+		s.mu.Unlock()
+		if already {
+			s.log.Debug("auth-agent-req rejected: already bound")
+			s.reply(req, false)
+			return true
+		}
 		sock, closer, err := agentfwd.Bind(s.h.cfg.Conn, s.log)
 		if err != nil {
 			s.log.Warn("agentfwd bind", "err", err)
@@ -197,6 +215,14 @@ func (s *sessionState) handle(req *ssh.Request) bool {
 			return true
 		}
 		s.mu.Lock()
+		// Re-check under the lock: another concurrent request could have
+		// snuck a binding in between the first check and Bind().
+		if s.agentCloser != nil {
+			s.mu.Unlock()
+			_ = closer.Close()
+			s.reply(req, false)
+			return true
+		}
 		s.agentSock = sock
 		s.agentCloser = closer
 		s.mu.Unlock()
@@ -245,6 +271,17 @@ func (s *sessionState) start(extraArgs []string) bool {
 	}
 
 	cmd := exec.CommandContext(s.ctx, shell, args...)
+	// Default Cancel is Process.Kill (SIGKILL to the immediate pid), which
+	// races with cleanup() and orphans grandchildren — the pgroup is left
+	// intact because nothing signals it. Override to SIGHUP the whole pgroup
+	// instead; cleanup() still owns final escalation to SIGKILL via
+	// killChildGroup, but by then either path has already signaled the tree.
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGHUP)
+	}
 	env := composeEnv(envSnap, shell)
 	if ptyReq != nil && ptyReq.Term != "" {
 		env = append(env, "TERM="+ptyReq.Term)
@@ -264,6 +301,10 @@ func (s *sessionState) start(extraArgs []string) bool {
 		cmd.Stdin = s.ch
 		cmd.Stdout = s.ch
 		cmd.Stderr = s.ch.Stderr()
+		// Put the child in its own process group so cleanup can kill any
+		// grandchildren it spawned (kill(-pgid, sig)). The PTY path already
+		// gets an isolated session/pgroup from creack/pty via Setsid.
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		if err := cmd.Start(); err != nil {
 			s.log.Warn("exec start failed", "shell", shell, "err", err)
 			return false
@@ -279,9 +320,26 @@ func (s *sessionState) start(extraArgs []string) bool {
 
 func (s *sessionState) waitAndExit(cmd *exec.Cmd) {
 	err := cmd.Wait()
-	status := exitStatus(err)
-	s.log.Debug("child exited", "status", status, "err", err)
-	_, _ = s.ch.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMessage{Status: uint32(status)}))
+	if sig, signum, ok := signalInfo(cmd); ok {
+		if name, ok := osSignalToSSH(sig); ok {
+			s.log.Debug("child killed", "signal", name, "err", err)
+			_, _ = s.ch.SendRequest("exit-signal", false, ssh.Marshal(&exitSignalMessage{
+				Signal:     name,
+				CoreDumped: coreDumped(cmd),
+			}))
+		} else {
+			// Signal not in RFC 4254's set (e.g. SIGSTOP/SIGCONT — unlikely to
+			// have killed the process, but be defensive). Report POSIX-style
+			// 128+signum as exit-status rather than uint32(-1).
+			status := 128 + int(signum)
+			s.log.Debug("child killed by non-RFC signal", "signum", signum, "status", status)
+			_, _ = s.ch.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMessage{Status: uint32(status)}))
+		}
+	} else {
+		status := exitStatus(err)
+		s.log.Debug("child exited", "status", status, "err", err)
+		_, _ = s.ch.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMessage{Status: uint32(status)}))
+	}
 	_ = s.ch.Close()
 	close(s.closed)
 }
@@ -308,13 +366,7 @@ func (s *sessionState) cleanup() {
 	s.agentCloser = nil
 	s.mu.Unlock()
 
-	if cmd != nil && cmd.Process != nil {
-		select {
-		case <-s.closed:
-		default:
-			_ = cmd.Process.Signal(syscall.SIGHUP)
-		}
-	}
+	killChildGroup(s.log, cmd, s.closed, childGraceTimeout)
 	if master != nil {
 		_ = master.Close()
 	}
@@ -322,6 +374,35 @@ func (s *sessionState) cleanup() {
 		_ = agentCloser.Close()
 	}
 	_ = s.ch.Close()
+}
+
+// killChildGroup tears down a running session child. If the child is already
+// reaped (closed is closed), it's a no-op. Otherwise it SIGHUPs the process
+// group, waits up to grace for the child to exit, and escalates to SIGKILL.
+// Returns only when the child has been reaped.
+//
+// Both session start paths arrange for pgid == child.Pid (PTY: Setsid via
+// creack/pty; non-PTY: Setpgid above), so kill(-pid, …) targets only this
+// session's tree — not the stdssh server's own process group.
+func killChildGroup(log *slog.Logger, cmd *exec.Cmd, closed <-chan struct{}, grace time.Duration) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	select {
+	case <-closed:
+		return
+	default:
+	}
+	pid := cmd.Process.Pid
+	_ = syscall.Kill(-pid, syscall.SIGHUP)
+	select {
+	case <-closed:
+		return
+	case <-time.After(grace):
+	}
+	log.Warn("child did not exit on SIGHUP; escalating to SIGKILL", "pid", pid)
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	<-closed
 }
 
 func (s *sessionState) resolveShell() string {
@@ -365,6 +446,68 @@ func exitStatus(err error) int {
 		return ee.ExitCode()
 	}
 	return 1
+}
+
+// signalInfo reports whether the process died from a signal and, if so,
+// returns the OS signal value. The signum is returned separately so callers
+// can fall back to POSIX 128+signum when the signal isn't in RFC 4254's set.
+func signalInfo(cmd *exec.Cmd) (syscall.Signal, int, bool) {
+	if cmd.ProcessState == nil {
+		return 0, 0, false
+	}
+	ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	if !ok || !ws.Signaled() {
+		return 0, 0, false
+	}
+	sig := ws.Signal()
+	return sig, int(sig), true
+}
+
+func coreDumped(cmd *exec.Cmd) bool {
+	if cmd.ProcessState == nil {
+		return false
+	}
+	ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
+	if !ok {
+		return false
+	}
+	return ws.CoreDump()
+}
+
+// osSignalToSSH is the inverse of sshSignalToOS: it maps an OS signal to the
+// RFC 4254 §6.10 name (without the "SIG" prefix). Returns false for signals
+// the RFC does not list (e.g. SIGSTOP, SIGCONT) — those are reported as
+// generic exit-status to avoid sending an out-of-spec name.
+func osSignalToSSH(sig syscall.Signal) (string, bool) {
+	switch sig {
+	case syscall.SIGABRT:
+		return "ABRT", true
+	case syscall.SIGALRM:
+		return "ALRM", true
+	case syscall.SIGFPE:
+		return "FPE", true
+	case syscall.SIGHUP:
+		return "HUP", true
+	case syscall.SIGILL:
+		return "ILL", true
+	case syscall.SIGINT:
+		return "INT", true
+	case syscall.SIGKILL:
+		return "KILL", true
+	case syscall.SIGPIPE:
+		return "PIPE", true
+	case syscall.SIGQUIT:
+		return "QUIT", true
+	case syscall.SIGSEGV:
+		return "SEGV", true
+	case syscall.SIGTERM:
+		return "TERM", true
+	case syscall.SIGUSR1:
+		return "USR1", true
+	case syscall.SIGUSR2:
+		return "USR2", true
+	}
+	return "", false
 }
 
 // RFC 4254 §6.10 signal names → syscall signals.
