@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"sync"
 
 	"golang.org/x/crypto/ssh"
+
+	"stdssh/internal/session"
 )
 
 type Config struct {
@@ -48,8 +51,21 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 	cfg.Logger.Info("ssh handshake completed",
 		"client_version", string(srvConn.ClientVersion()))
 
+	sessHandler := session.NewHandler(session.HandlerConfig{
+		Logger:        cfg.Logger,
+		Shell:         cfg.Shell,
+		AllowPTY:      cfg.AllowPTY,
+		AllowSFTP:     cfg.AllowSFTP,
+		AllowAgentFwd: cfg.AllowAgentFwd,
+	})
+
+	var wg sync.WaitGroup
 	go drainGlobalRequests(cfg.Logger, reqs)
-	go drainChannels(cfg.Logger, chans)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dispatchChannels(ctx, cfg.Logger, chans, sessHandler)
+	}()
 
 	waitErr := make(chan error, 1)
 	go func() { waitErr <- srvConn.Wait() }()
@@ -58,13 +74,13 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 	case <-ctx.Done():
 		srvConn.Close()
 		<-waitErr
-		return nil
 	case err := <-waitErr:
 		if err != nil && err.Error() != "EOF" {
 			cfg.Logger.Debug("ssh wait returned", "err", err)
 		}
-		return nil
 	}
+	wg.Wait()
+	return nil
 }
 
 func drainGlobalRequests(log *slog.Logger, reqs <-chan *ssh.Request) {
@@ -76,9 +92,23 @@ func drainGlobalRequests(log *slog.Logger, reqs <-chan *ssh.Request) {
 	}
 }
 
-func drainChannels(log *slog.Logger, chans <-chan ssh.NewChannel) {
+func dispatchChannels(ctx context.Context, log *slog.Logger, chans <-chan ssh.NewChannel, sess *session.Handler) {
+	var wg sync.WaitGroup
 	for newCh := range chans {
-		log.Debug("channel rejected (skeleton)", "type", newCh.ChannelType())
-		_ = newCh.Reject(ssh.UnknownChannelType, "not implemented")
+		newCh := newCh
+		switch newCh.ChannelType() {
+		case "session":
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := sess.Serve(ctx, newCh); err != nil {
+					log.Warn("session handler error", "err", err)
+				}
+			}()
+		default:
+			log.Debug("channel rejected", "type", newCh.ChannelType())
+			_ = newCh.Reject(ssh.UnknownChannelType, "not implemented")
+		}
 	}
+	wg.Wait()
 }
