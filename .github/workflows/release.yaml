@@ -1,0 +1,57 @@
+name: release
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Pick goreleaser args
+        id: args
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "args=release --clean" >> "$GITHUB_OUTPUT"
+            echo "mode=release" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=release --snapshot --clean" >> "$GITHUB_OUTPUT"
+            echo "mode=snapshot" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run goreleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: ${{ steps.args.outputs.args }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload snapshot artifacts
+        if: steps.args.outputs.mode == 'snapshot'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stdssh-${{ github.sha }}
+          path: |
+            dist/*.tar.gz
+            dist/checksums.txt
+          retention-days: 14
+          if-no-files-found: error
