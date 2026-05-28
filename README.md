@@ -32,7 +32,7 @@ ssh -o ProxyCommand="./stdssh --hostkey ./dev_hostkey" fake@fake
 | `--hostkey <path>` | PEM private key. Generated (ed25519, mode 0600) on first use if the file does not exist. |
 | `--hostkey-seed <string>` | Derive a deterministic ed25519 hostkey from this seed. |
 | `--shell <path>` | Override `$SHELL` for `exec` / `shell` sessions. |
-| `--log-level error\|warn\|info\|debug` | Stderr log level (default `info`). |
+| `--log-level error\|warn\|info\|debug` | Stderr log level (default `warn`). |
 | `--no-pty` | Reject `pty-req`. |
 | `--no-sftp` | Reject the `sftp` subsystem. |
 | `--no-forward` | Reject `direct-tcpip` and `tcpip-forward` (disables `-L`, `-R`, `-D`). |

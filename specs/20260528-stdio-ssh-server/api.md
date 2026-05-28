@@ -22,7 +22,7 @@ Feature toggles (all features on by default):
                               without a TTY).
 
 Other:
-  --log-level <level>         error | warn | info | debug. Default: info.
+  --log-level <level>         error | warn | info | debug. Default: warn.
                               Logs go to stderr only.
   --shell <path>              Override $SHELL for exec/shell sessions.
   --version                   Print version and exit.

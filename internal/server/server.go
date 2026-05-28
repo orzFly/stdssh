@@ -49,7 +49,7 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 	}
 	defer srvConn.Close()
 
-	cfg.Logger.Info("ssh handshake completed",
+	cfg.Logger.Debug("ssh handshake completed",
 		"client_version", string(srvConn.ClientVersion()))
 
 	sessHandler := session.NewHandler(session.HandlerConfig{

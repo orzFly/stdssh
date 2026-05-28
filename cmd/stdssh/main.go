@@ -39,7 +39,7 @@ func run() error {
 		hostkeyPath = flag.String("hostkey", "", "path to PEM private key; generated on first use if missing")
 		hostkeySeed = flag.String("hostkey-seed", "", "derive a deterministic ed25519 hostkey from this seed")
 		shellPath   = flag.String("shell", "", "override $SHELL for exec/shell sessions")
-		logLevel    = flag.String("log-level", "info", "log level: error|warn|info|debug")
+		logLevel    = flag.String("log-level", "warn", "log level: error|warn|info|debug")
 		noPTY       = flag.Bool("no-pty", false, "reject pty-req requests")
 		noSFTP      = flag.Bool("no-sftp", false, "reject the sftp subsystem")
 		noForward   = flag.Bool("no-forward", false, "reject direct-tcpip and tcpip-forward")
