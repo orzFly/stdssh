@@ -47,7 +47,6 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 	if err != nil {
 		return fmt.Errorf("server: handshake: %w", err)
 	}
-	defer srvConn.Close()
 
 	cfg.Logger.Debug("ssh handshake completed",
 		"client_version", string(srvConn.ClientVersion()))
@@ -63,7 +62,7 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 
 	var fwdMgr *forward.Manager
 	if cfg.AllowForward {
-		fwdMgr = forward.NewManager(ctx, srvConn, cfg.Logger)
+		fwdMgr = forward.NewManager(srvConn, cfg.Logger)
 		defer fwdMgr.Close()
 	}
 
@@ -80,7 +79,10 @@ func Run(ctx context.Context, conn net.Conn, cfg Config) error {
 
 	select {
 	case <-ctx.Done():
-		srvConn.Close()
+		// Close srvConn to unblock the Wait() goroutine; this is the only
+		// place we close it. On the waitErr branch the peer or the protocol
+		// has already torn down the transport.
+		_ = srvConn.Close()
 		<-waitErr
 	case err := <-waitErr:
 		if err != nil && err.Error() != "EOF" {

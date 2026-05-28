@@ -270,7 +270,9 @@ func (s *sessionState) start(extraArgs []string) bool {
 		}
 	}
 
+	s.mu.Lock()
 	s.cmd = cmd
+	s.mu.Unlock()
 	go s.waitAndExit(cmd)
 	return true
 }
@@ -299,18 +301,20 @@ func (s *sessionState) forwardSignal(name string) {
 }
 
 func (s *sessionState) cleanup() {
-	if s.cmd != nil && s.cmd.Process != nil {
-		select {
-		case <-s.closed:
-		default:
-			_ = s.cmd.Process.Signal(syscall.SIGHUP)
-		}
-	}
 	s.mu.Lock()
+	cmd := s.cmd
 	master := s.ptyMaster
 	agentCloser := s.agentCloser
 	s.agentCloser = nil
 	s.mu.Unlock()
+
+	if cmd != nil && cmd.Process != nil {
+		select {
+		case <-s.closed:
+		default:
+			_ = cmd.Process.Signal(syscall.SIGHUP)
+		}
+	}
 	if master != nil {
 		_ = master.Close()
 	}

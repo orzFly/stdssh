@@ -1,7 +1,6 @@
 package forward
 
 import (
-	"context"
 	"encoding/binary"
 	"errors"
 	"log/slog"
@@ -32,20 +31,18 @@ type forwardedTCPIPPayload struct {
 type Manager struct {
 	conn *ssh.ServerConn
 	log  *slog.Logger
-	ctx  context.Context
 
 	mu        sync.Mutex
 	listeners map[string]net.Listener
 	closed    bool
 }
 
-// NewManager returns a Manager bound to the given ServerConn. Cancel ctx (or
-// call Close) to stop all listeners.
-func NewManager(ctx context.Context, conn *ssh.ServerConn, log *slog.Logger) *Manager {
+// NewManager returns a Manager bound to the given ServerConn. Call Close to
+// stop all listeners.
+func NewManager(conn *ssh.ServerConn, log *slog.Logger) *Manager {
 	return &Manager{
 		conn:      conn,
 		log:       log,
-		ctx:       ctx,
 		listeners: map[string]net.Listener{},
 	}
 }

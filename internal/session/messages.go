@@ -38,10 +38,3 @@ type windowChangeRequest struct {
 type exitStatusMessage struct {
 	Status uint32
 }
-
-type exitSignalMessage struct {
-	Signal     string
-	CoreDumped bool
-	Errmsg     string
-	Lang       string
-}
