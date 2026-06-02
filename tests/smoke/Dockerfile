@@ -18,31 +18,31 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w -X main.version=smoke' \
 FROM docker.io/library/debian:bookworm-slim AS runtime-debian
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      openssh-client ca-certificates curl netcat-openbsd socat python3 procps \
+      openssh-client ca-certificates curl netcat-openbsd socat python3 procps rsync \
     && rm -rf /var/lib/apt/lists/*
 
 FROM docker.io/library/ubuntu:24.04 AS runtime-ubuntu
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      openssh-client ca-certificates curl netcat-openbsd socat python3 procps \
+      openssh-client ca-certificates curl netcat-openbsd socat python3 procps rsync \
     && rm -rf /var/lib/apt/lists/*
 
 FROM docker.io/library/alpine:3 AS runtime-alpine
 RUN apk add --no-cache \
       bash openssh-client-default openssh-keygen \
       ca-certificates curl socat netcat-openbsd python3 ncurses coreutils \
-      diffutils grep sed
+      diffutils grep sed rsync
 
 FROM docker.io/library/archlinux:base AS runtime-arch
 RUN pacman -Syu --noconfirm \
       openssh curl openbsd-netcat socat python ncurses ca-certificates \
-      diffutils \
+      diffutils rsync \
     && rm -rf /var/cache/pacman/pkg/* /var/lib/pacman/sync/*
 
 FROM docker.io/library/fedora:40 AS runtime-fedora
 RUN dnf -y install \
       openssh-clients ca-certificates curl nmap-ncat socat python3 ncurses \
-      procps-ng diffutils \
+      procps-ng diffutils rsync \
     && dnf clean all
 
 # ---- final stage --------------------------------------------------------------
