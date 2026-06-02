@@ -11,6 +11,7 @@
       perSystem = { system, pkgs, config, ... }:
         let
           common = import ./.nix/common.nix { inherit pkgs; };
+          version = "git-${inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown"}";
           src = pkgs.lib.fileset.toSource {
             root = ./.;
             fileset = pkgs.lib.fileset.unions [
@@ -22,12 +23,15 @@
           };
           stdssh = pkgs.buildGoModule {
             pname = "stdssh";
-            version = "0.1.0";
-            inherit src;
+            inherit version src;
             go = common.go;
             subPackages = [ "cmd/stdssh" ];
             vendorHash = "sha256-1AOwmr6QQHMBQD2tPbfJfUM66jnkkwqxx9km7pSSNwc=";
             doCheck = false;
+            # Match the goreleaser release build: static (CGO off) + stripped.
+            # -trimpath is already added by buildGoModule by default.
+            env.CGO_ENABLED = 0;
+            ldflags = [ "-s" "-w" "-X main.version=${version}" ];
           };
         in
         {
