@@ -340,7 +340,25 @@ func (s *sessionState) start(extraArgs []string) bool {
 			return false
 		}
 	} else {
-		cmd.Stdin = s.ch
+		// Stdin must not be wired directly to s.ch. os/exec spawns an implicit
+		// copy goroutine for a non-*os.File reader, and cmd.Wait() blocks until
+		// it returns — but that goroutine sits in s.ch.Read() forever whenever
+		// the client keeps its stdin open after the remote command exits. That
+		// is the norm, not the exception: `ssh host cmd` with an open local
+		// stdin, and rsync's end-of-transfer handshake (the sender holds the
+		// channel open waiting for the server to close first), both hit it.
+		// The wedged Wait() means waitAndExit never sends exit-status / closes
+		// the channel, so the client hangs — rsync deadlocks outright.
+		//
+		// Pump stdin through an explicit pipe in a detached goroutine instead:
+		// Wait() closes the write end on process exit (so a pending write fails
+		// fast) and no longer waits on our copy, so exit propagates promptly.
+		// The goroutine itself unblocks when s.ch is closed just below.
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			s.log.Warn("exec stdin pipe failed", "shell", shell, "err", err)
+			return false
+		}
 		cmd.Stdout = s.ch
 		cmd.Stderr = s.ch.Stderr()
 		// Put the child in its own process group so cleanup can kill any
@@ -348,9 +366,14 @@ func (s *sessionState) start(extraArgs []string) bool {
 		// gets an isolated session/pgroup from creack/pty via Setsid.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		if err := cmd.Start(); err != nil {
+			_ = stdin.Close()
 			s.log.Warn("exec start failed", "shell", shell, "err", err)
 			return false
 		}
+		go func() {
+			_, _ = io.Copy(stdin, s.ch)
+			_ = stdin.Close()
+		}()
 	}
 
 	s.mu.Lock()
