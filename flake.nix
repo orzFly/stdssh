@@ -26,7 +26,7 @@
             inherit src;
             go = common.go;
             subPackages = [ "cmd/stdssh" ];
-            vendorHash = "sha256-TwzV2a69cj/d7DA3Rd4+9B2g45iyak/ReQ+5kReEz6c=";
+            vendorHash = "sha256-1AOwmr6QQHMBQD2tPbfJfUM66jnkkwqxx9km7pSSNwc=";
             doCheck = false;
           };
         in
