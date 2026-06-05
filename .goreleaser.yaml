@@ -32,6 +32,30 @@ archives:
     files:
       - LICENSE
 
+nfpms:
+  - id: stdssh
+    ids: [stdssh]
+    package_name: stdssh
+    vendor: stdssh
+    homepage: https://github.com/orzFly/stdssh
+    maintainer: stdssh maintainers <noreply@github.com>
+    description: |-
+      SSH server that speaks the SSH protocol over inherited stdin/stdout.
+      Meant to be driven through kubectl exec (or any stdio pipe) so a stock
+      ssh client gets exec, PTY shells, SFTP, port forwarding, and agent
+      forwarding into a pod — no listening socket, no auth, no PAM.
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/stdssh/copyright
+    file_name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
 checksum:
   name_template: checksums.txt
 
