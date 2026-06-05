@@ -20,14 +20,32 @@ jobs:
         distro: [debian, ubuntu, alpine, arch, fedora]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      # Build the release packages (deb/rpm/apk) the smoke images install from,
+      # so the suite exercises the same artifacts users get.
+      - name: Build release packages
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --snapshot --clean
 
       - name: Run smoke cases
         env:
           ENGINE: docker
           DISTRO: ${{ matrix.distro }}
+          SKIP_PACKAGE_BUILD: '1'
         run: bash tests/smoke/run.sh
 
   goreleaser:
@@ -72,6 +90,9 @@ jobs:
           name: stdssh-${{ github.sha }}
           path: |
             dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
+            dist/*.apk
             dist/checksums.txt
           retention-days: 14
           if-no-files-found: error
