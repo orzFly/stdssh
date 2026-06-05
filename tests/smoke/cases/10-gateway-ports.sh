@@ -57,7 +57,7 @@ GW_OPTS=(
   -o StrictHostKeyChecking=no
   -o UserKnownHostsFile=/dev/null
   -o LogLevel=ERROR
-  -o "ProxyCommand=/usr/local/bin/stdssh --hostkey-seed smoke-seed --log-level=warn --gateway-ports"
+  -o "ProxyCommand=stdssh --hostkey-seed smoke-seed --log-level=warn --gateway-ports"
 )
 ssh "${GW_OPTS[@]}" -N -R "0.0.0.0:$PORT:127.0.0.1:22" fake@fake &
 SSH_PID=$!

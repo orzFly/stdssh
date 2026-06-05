@@ -7,6 +7,7 @@
 #   DISTROS='debian alpine' tests/smoke/run.sh      # subset
 #   ENGINE=docker tests/smoke/run.sh                # force engine (default: podman > docker)
 #   IMAGE_PREFIX=foo tests/smoke/run.sh             # override tag prefix
+#   SKIP_PACKAGE_BUILD=1 tests/smoke/run.sh         # reuse an existing dist/ (CI builds it upstream)
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."  # repo root
@@ -31,6 +32,23 @@ fi
 DISTROS="${DISTROS:-$DEFAULT_DISTROS}"
 
 IMAGE_PREFIX="${IMAGE_PREFIX:-stdssh-smoke}"
+
+# The runtime images install stdssh from the GoReleaser packages in dist/. Build
+# them with a snapshot release unless dist/ already holds them (e.g. CI ran
+# goreleaser upstream and set SKIP_PACKAGE_BUILD=1).
+if [ "${SKIP_PACKAGE_BUILD:-0}" != 1 ]; then
+  if ! command -v goreleaser >/dev/null 2>&1; then
+    echo 'goreleaser not found in PATH (needed to build the dist/ packages).' >&2
+    echo 'Install it, or set SKIP_PACKAGE_BUILD=1 after producing dist/ yourself.' >&2
+    exit 1
+  fi
+  echo '## building release packages (goreleaser --snapshot)'
+  goreleaser release --snapshot --clean
+fi
+if ! ls dist/stdssh_*_linux_*.deb >/dev/null 2>&1; then
+  echo 'dist/ has no stdssh packages; run goreleaser first or unset SKIP_PACKAGE_BUILD.' >&2
+  exit 1
+fi
 
 fails=()
 for d in $DISTROS; do
