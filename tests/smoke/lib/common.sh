@@ -1,7 +1,9 @@
 # Shared helpers sourced by every smoke case.
 # Keeps the ProxyCommand and ssh-client options in one place.
 
-PROXY_CMD="${PROXY_CMD:-/usr/local/bin/stdssh --hostkey-seed smoke-seed --log-level=warn}"
+# stdssh is resolved via PATH so it works whether installed from a package
+# (/usr/bin) or copied in (/usr/local/bin).
+PROXY_CMD="${PROXY_CMD:-stdssh --hostkey-seed smoke-seed --log-level=warn}"
 
 _SSH_BASE_OPTS=(
   -o BatchMode=yes
