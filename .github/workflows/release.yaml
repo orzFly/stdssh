@@ -45,6 +45,7 @@ jobs:
         env:
           ENGINE: docker
           DISTRO: ${{ matrix.distro }}
+          STDSSH_FROM: package
           SKIP_PACKAGE_BUILD: '1'
         run: bash tests/smoke/run.sh
 
