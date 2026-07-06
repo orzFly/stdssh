@@ -154,6 +154,14 @@ srv, err := sftp.NewServer(channel)  // channel implements io.ReadWriter
 srv.Serve()
 ```
 
+The server is constructed with `WithServerWorkingDirectory($HOME)` so a bare
+relative path like `.bashrc` resolves against the user's home, matching sshd,
+which `chdir()`s to `$HOME` before exec'ing `sftp-server` (session.c). Without
+it, relative paths would resolve against stdssh's process CWD (the container
+WORKDIR), so `scp host:.bashrc .` would miss `~/.bashrc`. `..` walks the real
+filesystem up from home un-clamped, as in OpenSSH. Falls back to the process
+CWD when `$HOME` can't be resolved.
+
 No chroot, no path filtering — the SFTP server inherits process credentials
 (typical container `uid`). If the operator wants to restrict, run the
 container as a less-privileged user.

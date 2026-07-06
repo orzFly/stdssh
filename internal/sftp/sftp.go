@@ -14,8 +14,20 @@ import (
 // Serve runs an SFTP server bound to ch. It returns when the client closes
 // the channel or ctx is cancelled. The channel is not closed by Serve; the
 // caller owns lifecycle (so it can send exit-status before closing).
-func Serve(ctx context.Context, ch ssh.Channel) error {
-	srv, err := sftp.NewServer(nopCloser{ch})
+//
+// workDir is the directory relative SFTP paths resolve against, mirroring
+// sshd, which chdir()s to the user's home before exec'ing sftp-server
+// (session.c). Pass the user's home directory so a bare path like ".bashrc"
+// lands in ~ rather than stdssh's process CWD (typically the container
+// WORKDIR, not home). An empty workDir leaves pkg/sftp's default (process
+// CWD) in place — do not pass "" via WithServerWorkingDirectory, which pkg/sftp
+// would canonicalise to "/".
+func Serve(ctx context.Context, ch ssh.Channel, workDir string) error {
+	var opts []sftp.ServerOption
+	if workDir != "" {
+		opts = append(opts, sftp.WithServerWorkingDirectory(workDir))
+	}
+	srv, err := sftp.NewServer(nopCloser{ch}, opts...)
 	if err != nil {
 		return fmt.Errorf("sftp: new server: %w", err)
 	}
