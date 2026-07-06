@@ -180,7 +180,7 @@ func (s *sessionState) handle(req *ssh.Request) bool {
 				return true
 			}
 			s.reply(req, true)
-			if err := sftp.Serve(s.ctx, s.ch); err != nil {
+			if err := sftp.Serve(s.ctx, s.ch, homeDir()); err != nil {
 				s.log.Warn("sftp serve", "err", err)
 			}
 			_, _ = s.ch.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMessage{Status: 0}))
