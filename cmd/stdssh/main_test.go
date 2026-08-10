@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"strings"
 	"testing"
 )
 
@@ -32,14 +33,14 @@ func TestBuildLoggerValid(t *testing.T) {
 }
 
 func TestParseCIDRsEmpty(t *testing.T) {
-	nets, err := parseCIDRs("")
+	nets, err := parseCIDRs("--forward-allow", "")
 	if err != nil || nets != nil {
 		t.Errorf("empty string: nets=%v err=%v", nets, err)
 	}
 }
 
 func TestParseCIDRsSingle(t *testing.T) {
-	nets, err := parseCIDRs("10.0.0.0/8")
+	nets, err := parseCIDRs("--forward-allow", "10.0.0.0/8")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +53,7 @@ func TestParseCIDRsSingle(t *testing.T) {
 }
 
 func TestParseCIDRsMulti(t *testing.T) {
-	nets, err := parseCIDRs("10.0.0.0/8, 172.16.0.0/12")
+	nets, err := parseCIDRs("--forward-allow", "10.0.0.0/8, 172.16.0.0/12")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,13 +63,25 @@ func TestParseCIDRsMulti(t *testing.T) {
 }
 
 func TestParseCIDRsBadInput(t *testing.T) {
-	_, err := parseCIDRs("not-a-cidr")
+	_, err := parseCIDRs("--forward-allow", "not-a-cidr")
 	if err == nil {
 		t.Fatal("expected error for invalid CIDR")
 	}
 	var fe flagError
 	if !errors.As(err, &fe) {
 		t.Errorf("error %v should be flagError", err)
+	}
+}
+
+func TestParseCIDRsBadInputNamesItsFlag(t *testing.T) {
+	for _, flagName := range []string{"--forward-allow", "--forward-deny"} {
+		_, err := parseCIDRs(flagName, "not-a-cidr")
+		if err == nil {
+			t.Fatalf("%s: expected error for invalid CIDR", flagName)
+		}
+		if !strings.Contains(err.Error(), flagName) {
+			t.Errorf("%s: error %q should name the offending flag", flagName, err)
+		}
 	}
 }
 

@@ -39,6 +39,7 @@ ssh -o ProxyCommand="./stdssh --hostkey ./dev_hostkey" fake@fake
 | `--max-forwards <n>` | Maximum concurrent `-R` listeners (`0` = unlimited, default). |
 | `--forward-allow <CIDRs>` | Comma-separated CIDRs for allowed `-L` destinations (default: all). |
 | `--forward-deny <CIDRs>` | Comma-separated CIDRs to deny for `-L` destinations (takes precedence over allow). |
+| `--gateway-ports` | Allow `-R` remote forwards to bind non-loopback addresses (matches OpenSSH `GatewayPorts`). Default binds to loopback only. |
 | `--no-agent-forward` | Reject `auth-agent-req@openssh.com`. |
 | `--version` | Print version and exit. |
 

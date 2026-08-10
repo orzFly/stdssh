@@ -70,11 +70,11 @@ func run() error {
 		return err
 	}
 
-	forwardAllow, err := parseCIDRs(*forwardAllowStr)
+	forwardAllow, err := parseCIDRs("--forward-allow", *forwardAllowStr)
 	if err != nil {
 		return err
 	}
-	forwardDeny, err := parseCIDRs(*forwardDenyStr)
+	forwardDeny, err := parseCIDRs("--forward-deny", *forwardDenyStr)
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func buildLogger(level string) (*slog.Logger, error) {
 	return slog.New(h), nil
 }
 
-func parseCIDRs(s string) ([]*net.IPNet, error) {
+func parseCIDRs(flagName, s string) ([]*net.IPNet, error) {
 	if s == "" {
 		return nil, nil
 	}
@@ -156,7 +156,7 @@ func parseCIDRs(s string) ([]*net.IPNet, error) {
 		}
 		_, ipnet, err := net.ParseCIDR(cidr)
 		if err != nil {
-			return nil, flagError(fmt.Sprintf("bad --forward-allow CIDR %q: %v", cidr, err))
+			return nil, flagError(fmt.Sprintf("bad %s CIDR %q: %v", flagName, cidr, err))
 		}
 		nets = append(nets, ipnet)
 	}
