@@ -37,13 +37,13 @@ func main() {
 
 func run() error {
 	var (
-		hostkeyPath = flag.String("hostkey", "", "path to PEM private key; generated on first use if missing")
-		hostkeySeed = flag.String("hostkey-seed", "", "derive a deterministic ed25519 hostkey from this seed")
-		shellPath   = flag.String("shell", "", "override $SHELL for exec/shell sessions")
-		logLevel    = flag.String("log-level", "warn", "log level: error|warn|info|debug")
-		noPTY       = flag.Bool("no-pty", false, "reject pty-req requests")
-		noSFTP      = flag.Bool("no-sftp", false, "reject the sftp subsystem")
-		noForward   = flag.Bool("no-forward", false, "reject direct-tcpip and tcpip-forward")
+		hostkeyPath     = flag.String("hostkey", "", "path to PEM private key; generated on first use if missing")
+		hostkeySeed     = flag.String("hostkey-seed", "", "derive a deterministic ed25519 hostkey from this seed")
+		shellPath       = flag.String("shell", "", "override $SHELL for exec/shell sessions")
+		logLevel        = flag.String("log-level", "warn", "log level: error|warn|info|debug")
+		noPTY           = flag.Bool("no-pty", false, "reject pty-req requests")
+		noSFTP          = flag.Bool("no-sftp", false, "reject the sftp subsystem")
+		noForward       = flag.Bool("no-forward", false, "reject direct-tcpip and tcpip-forward")
 		noAgentFwd      = flag.Bool("no-agent-forward", false, "reject SSH agent forwarding")
 		maxForwards     = flag.Int("max-forwards", 0, "maximum concurrent -R listeners (0 = unlimited)")
 		forwardAllowStr = flag.String("forward-allow", "", "comma-separated CIDRs for allowed -L destinations (default: all)")
@@ -96,10 +96,10 @@ func run() error {
 		AllowSFTP:     !*noSFTP,
 		AllowForward:  !*noForward,
 		AllowAgentFwd: !*noAgentFwd,
-		MaxForwards:  *maxForwards,
-		ForwardAllow: forwardAllow,
-		ForwardDeny:  forwardDeny,
-		GatewayPorts: *gatewayPorts,
+		MaxForwards:   *maxForwards,
+		ForwardAllow:  forwardAllow,
+		ForwardDeny:   forwardDeny,
+		GatewayPorts:  *gatewayPorts,
 	}
 
 	// Catch SIGHUP too: when stdssh runs as an ssh ProxyCommand, the ssh

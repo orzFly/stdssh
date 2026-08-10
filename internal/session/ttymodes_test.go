@@ -52,10 +52,10 @@ func TestParseModelistTerminatedByOpEnd(t *testing.T) {
 		op uint8
 		v  uint32
 	}{
-		{1, 0x03},     // VINTR = ^C
-		{36, 1},       // ICRNL on
-		{53, 0},       // ECHO off
-		{128, 38400},  // ISPEED
+		{1, 0x03},    // VINTR = ^C
+		{36, 1},      // ICRNL on
+		{53, 0},      // ECHO off
+		{128, 38400}, // ISPEED
 	}, true)
 	// Append garbage after TTY_OP_END — must NOT be parsed.
 	in = append(in, 0xFF, 0xAA, 0x55)

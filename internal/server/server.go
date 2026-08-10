@@ -25,10 +25,10 @@ type Config struct {
 	AllowSFTP     bool
 	AllowForward  bool
 	AllowAgentFwd bool
-	MaxForwards  int          // max concurrent -R listeners; 0 = unlimited
-	ForwardAllow []*net.IPNet // allowed -L destination CIDRs; nil = all
-	ForwardDeny  []*net.IPNet // denied -L destination CIDRs; deny wins over allow
-	GatewayPorts bool         // allow -R bind on non-loopback; OpenSSH default is false
+	MaxForwards   int          // max concurrent -R listeners; 0 = unlimited
+	ForwardAllow  []*net.IPNet // allowed -L destination CIDRs; nil = all
+	ForwardDeny   []*net.IPNet // denied -L destination CIDRs; deny wins over allow
+	GatewayPorts  bool         // allow -R bind on non-loopback; OpenSSH default is false
 }
 
 // Run drives an SSH server session on conn until either side closes.
